@@ -2,6 +2,8 @@ from flask import Flask, request
 import requests
 import json
 import lineconfig
+import openaiconfig
+from openai import OpenAI
 import schedule
 import time
 import datetime
@@ -13,6 +15,31 @@ import sqlite3
 
 time_short = 7
 time_long = 15
+
+messages=[]
+client = OpenAI()
+
+# システムのプロンプト
+system_content = """
+あなたは私の友達です。標準語で会話し応援します．
+"""
+
+# 初期メッセージリスト
+messages=[{"role":"system", "content":system_content}]
+
+def get_reply(user_message):
+
+    user_message = user_message
+    messages.append({"role":"user","content":user_message})
+
+    # OpenAI APIの呼び出し
+    response = client.chat.completions.create(
+        model=openaiconfig.model,
+        messages=messages
+    )
+    messages.append(response.choices[0].message)
+
+    return response.choices[0].message.content
 
 # インスタンス生成
 app = Flask(__name__)
@@ -30,6 +57,11 @@ db = SQLAlchemy(app)
 # データベースに接続
 connection = sqlite3.connect("line_data.sqlite", check_same_thread=False)
 cursor = connection.cursor()
+
+# ユーザーモデル
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.String(200), unique=True, nullable=False)
 
 # モデル
 class Task(db.Model):
@@ -55,6 +87,16 @@ def init_db():
 def response():
     posted_data=request.data
     posted_object=json.loads(posted_data.decode('utf8'))
+    # ユーザーIDの取得
+    user_id_from_line = posted_object['events'][0]['source']['userId']
+    # ユーザーIDがデータベースに存在するか確認
+    user = User.query.filter_by(user_id=user_id_from_line).first()
+    # ユーザーが存在しない場合は新しく作成
+    if not user:
+        user = User(user_id=user_id_from_line)
+        db.session.add(user)
+        db.session.commit()
+        print(f"新しいユーザーを登録しました: {user_id_from_line}")
     response_to_line=''
     print("=request from LINE Messaging API")
     print(request.data) ## or request.get_data()
@@ -81,8 +123,15 @@ def response():
             text = '合計は、' + str(total) + 'です。'
             task04 = Task(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
         else:
-            text = posted_object['events'][0]['message']['text']+'を記録しました'
-            task04 = Task(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = posted_object['events'][0]['message']['text'], user_id = posted_object['events'][0]['source']['userId'])
+            #posted_object['events'][0]['message']['text']が数字かどうかを判定
+            try:
+                int(posted_object['events'][0]['message']['text'])
+            except ValueError:
+                text = get_reply(posted_object['events'][0]['message']['text'])
+                task04 = Task(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
+            else:
+                text = posted_object['events'][0]['message']['text']+'を記録しました'
+                task04 = Task(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = posted_object['events'][0]['message']['text'], user_id = posted_object['events'][0]['source']['userId'])
         db.session.add(task04)
         db.session.commit()
         print('登録 =>', task04)
