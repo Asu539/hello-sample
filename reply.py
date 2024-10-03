@@ -13,6 +13,7 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import create_engine, select, func
 import sqlite3
 
+
 time_short = 7
 time_long = 15
 
@@ -21,7 +22,7 @@ client = OpenAI()
 
 # システムのプロンプト
 system_content = """
-あなたは私の友達です。標準語で会話し応援します．
+あなたは私の習慣化サポーターです。標準語で会話し応援します．
 """
 
 # 初期メッセージリスト
@@ -60,12 +61,18 @@ cursor = connection.cursor()
 
 # ユーザーモデル
 class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    user_id = db.Column(db.String(200), unique=True, nullable=False)
+    user_id = db.Column(db.String(200), primary_key=True, unique=True, nullable=False)
+
+#タスクモデル
+class Task(db.Model):
+    __tablename__ = 'tasks'
+    task_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    time = db.Column(db.DateTime, nullable=False)
+    user_id = db.Column(db.String(200), nullable=False)
 
 # モデル
-class Task(db.Model):
-    __tablename__ = 'talks'
+class Message(db.Model):
+    __tablename__ = 'Massages'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     content = db.Column(db.String(200), nullable=False)
     time = db.Column(db.DateTime, nullable=False)
@@ -73,6 +80,7 @@ class Task(db.Model):
     #user = db.Column(db.Integer, nullable=False, default=0)
     number = db.Column(db.Integer, nullable=False, default=0)
     user_id = db.Column(db.String(200), nullable=False)
+    task_id = db.Column(db.Integer, autoincrement=True)
 
     def __str__(self):
         return f'順番:{self.id} 內容:{self.number}'
@@ -108,33 +116,33 @@ def response():
         if posted_object['events'][0]['message']['text'] == '7分':
             #timeが7分以内のもののnumberの合計を取得
             seven_minutes_ago = datetime.datetime.now() - datetime.timedelta(minutes=time_short)
-            total = db.session.query(func.sum(Task.number)).filter(Task.time >= seven_minutes_ago, Task.user_id == posted_object['events'][0]['source']['userId']).scalar()
+            total = db.session.query(func.sum(Message.number)).filter(Message.time >= seven_minutes_ago, Message.user_id == posted_object['events'][0]['source']['userId']).scalar()
             text = '7分以内の合計は、' + str(total) + 'です。'
-            task04 = Task(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
+            Message04 = Message(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
         elif posted_object['events'][0]['message']['text'] == '15分':
             #timeが30分以内のもののnumberの合計を取得
             thirty_days_ago = datetime.datetime.now() - datetime.timedelta(minutes=time_long)
-            total = db.session.query(func.sum(Task.number)).filter(Task.time >= thirty_days_ago, Task.user_id == posted_object['events'][0]['source']['userId']).scalar()
+            total = db.session.query(func.sum(Message.number)).filter(Message.time >= thirty_days_ago, Message.user_id == posted_object['events'][0]['source']['userId']).scalar()
             text = '15分以内の合計は、' + str(total) + 'です。'
-            task04 = Task(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
+            Message04 = Message(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
         elif posted_object['events'][0]['message']['text'] == '合計':
             #numberの合計を取得ただし、userが1のものだけ
-            total = db.session.query(func.sum(Task.number)).filter(Task.user_id == posted_object['events'][0]['source']['userId']).scalar()
+            total = db.session.query(func.sum(Message.number)).filter(Message.user_id == posted_object['events'][0]['source']['userId']).scalar()
             text = '合計は、' + str(total) + 'です。'
-            task04 = Task(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
+            Message04 = Message(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
         else:
             #posted_object['events'][0]['message']['text']が数字かどうかを判定
             try:
                 int(posted_object['events'][0]['message']['text'])
             except ValueError:
                 text = get_reply(posted_object['events'][0]['message']['text'])
-                task04 = Task(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
+                Message04 = Message(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
             else:
                 text = posted_object['events'][0]['message']['text']+'を記録しました'
-                task04 = Task(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = posted_object['events'][0]['message']['text'], user_id = posted_object['events'][0]['source']['userId'])
-        db.session.add(task04)
+                Message04 = Message(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = posted_object['events'][0]['message']['text'], user_id = posted_object['events'][0]['source']['userId'])
+        db.session.add(Message04)
         db.session.commit()
-        print('登録 =>', task04)
+        print('登録 =>', Message04)
         # テーブルのレコード数を取得
         cursor.execute("SELECT COUNT(*) FROM talks")
         count = cursor.fetchone()[0]
@@ -143,7 +151,7 @@ def response():
 
         """
         if count > 1:
-            target = Task.query.filter_by(id=count-2).first()
+            target = Message.query.filter_by(id=count-2).first()
             print('取得 =>', target.content)
             text = '前回の会話は、' + target.content
         else:
@@ -173,11 +181,11 @@ def response():
     print("=request to LINE Messaging API")
     print(payload)
     #LINEからの返信をデータベースに登録
-    task05 = Task(content=text, time=datetime.datetime.now(), number = 1, user_id = 'line')
-    db.session.add(task05)
+    Message05 = Message(content=text, time=datetime.datetime.now(), number = 1, user_id = 'line')
+    db.session.add(Message05)
     db.session.commit()
-    if task05.number == posted_object['events'][0]['message']['text']:
-            task05.user = 1
+    if Message05.number == posted_object['events'][0]['message']['text']:
+            Message05.user = 1
     response = requests.post(lineconfig.REPLYAPIURL, data=json.dumps(payload),headers=headers)
     print("=response from LINE Messaging API")
     print(response)
