@@ -59,20 +59,25 @@ db = SQLAlchemy(app)
 connection = sqlite3.connect("line_data.sqlite", check_same_thread=False)
 cursor = connection.cursor()
 
+"""
 # ユーザーモデル
 class User(db.Model):
     user_id = db.Column(db.String(200), primary_key=True, unique=True, nullable=False)
+"""
 
 #タスクモデル
 class Task(db.Model):
     __tablename__ = 'tasks'
     task_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    time = db.Column(db.DateTime, nullable=False)
+    start_date = db.Column(db.DateTime, nullable=False, default=datetime.datetime.now)
     user_id = db.Column(db.String(200), nullable=False)
+    task_name = db.Column(db.String(200), nullable=False, default='未定')
+    daily_goal = db.Column(db.Integer, nullable=False, default=0)
+    enable = db.Column(db.Integer, nullable=False, default=True)
 
-# モデル
+# メッセージモデル
 class Message(db.Model):
-    __tablename__ = 'Massages'
+    __tablename__ = 'Messages'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     content = db.Column(db.String(200), nullable=False)
     time = db.Column(db.DateTime, nullable=False)
@@ -91,20 +96,24 @@ def init_db():
         db.create_all()
 
 
+task_status = {}
+
 @app.route('/callback', methods=['POST'])
 def response():
     posted_data=request.data
     posted_object=json.loads(posted_data.decode('utf8'))
     # ユーザーIDの取得
     user_id_from_line = posted_object['events'][0]['source']['userId']
-    # ユーザーIDがデータベースに存在するか確認
-    user = User.query.filter_by(user_id=user_id_from_line).first()
-    # ユーザーが存在しない場合は新しく作成
-    if not user:
-        user = User(user_id=user_id_from_line)
-        db.session.add(user)
+    # ユーザーIDがデータベースに存在するか確認(初めてのユーザーはとりあえず一個タスク登録)
+    task = Task.query.filter_by(user_id=user_id_from_line).first()
+    if not task:
+        new = Task(user_id=user_id_from_line)
+        db.session.add(new)
         db.session.commit()
         print(f"新しいユーザーを登録しました: {user_id_from_line}")
+    # ユーザーが初めてアクセスした場合、状態を 'idle' に設定
+    if user_id_from_line not in task_status:
+        task_status[user_id_from_line] = 'idle'
     response_to_line=''
     print("=request from LINE Messaging API")
     print(request.data) ## or request.get_data()
@@ -113,50 +122,85 @@ def response():
     # CRUD操作
     with app.app_context():
         print('=========1件登録=========')
-        if posted_object['events'][0]['message']['text'] == '7分':
-            #timeが7分以内のもののnumberの合計を取得
-            seven_minutes_ago = datetime.datetime.now() - datetime.timedelta(minutes=time_short)
-            total = db.session.query(func.sum(Message.number)).filter(Message.time >= seven_minutes_ago, Message.user_id == posted_object['events'][0]['source']['userId']).scalar()
-            text = '7分以内の合計は、' + str(total) + 'です。'
-            Message04 = Message(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
-        elif posted_object['events'][0]['message']['text'] == '15分':
-            #timeが30分以内のもののnumberの合計を取得
-            thirty_days_ago = datetime.datetime.now() - datetime.timedelta(minutes=time_long)
-            total = db.session.query(func.sum(Message.number)).filter(Message.time >= thirty_days_ago, Message.user_id == posted_object['events'][0]['source']['userId']).scalar()
-            text = '15分以内の合計は、' + str(total) + 'です。'
-            Message04 = Message(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
-        elif posted_object['events'][0]['message']['text'] == '合計':
-            #numberの合計を取得ただし、userが1のものだけ
-            total = db.session.query(func.sum(Message.number)).filter(Message.user_id == posted_object['events'][0]['source']['userId']).scalar()
-            text = '合計は、' + str(total) + 'です。'
-            Message04 = Message(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
-        else:
-            #posted_object['events'][0]['message']['text']が数字かどうかを判定
-            try:
-                int(posted_object['events'][0]['message']['text'])
-            except ValueError:
-                text = get_reply(posted_object['events'][0]['message']['text'])
-                Message04 = Message(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
+        # ユーザーからのメッセージを取得
+        user_message = posted_object['events'][0]['message']['text']
+        text = ""  # 返信テキスト
+        # 現在のタスクの状態を確認
+        current_task = Task.query.filter_by(user_id=user_id_from_line, enable=True).order_by(Task.task_id.desc()).first()
+        if task_status[user_id_from_line] == 'idle':  # 通常の状態
+            if user_message == '7分':
+                #timeが7分以内のもののnumberの合計を取得
+                seven_minutes_ago = datetime.datetime.now() - datetime.timedelta(minutes=time_short)
+                total = db.session.query(func.sum(Message.number)).filter(Message.time >= seven_minutes_ago, Message.user_id == posted_object['events'][0]['source']['userId']).scalar()
+                text = '7分以内の合計は、' + str(total) + 'です。'
+                Message04 = Message(content=user_message, time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
+            elif user_message == '15分':
+                #timeが30分以内のもののnumberの合計を取得
+                thirty_days_ago = datetime.datetime.now() - datetime.timedelta(minutes=time_long)
+                total = db.session.query(func.sum(Message.number)).filter(Message.time >= thirty_days_ago, Message.user_id == posted_object['events'][0]['source']['userId']).scalar()
+                text = '15分以内の合計は、' + str(total) + 'です。'
+                Message04 = Message(content=user_message, time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
+            elif user_message == '合計':
+                #numberの合計を取得ただし、userが1のものだけ
+                total = db.session.query(func.sum(Message.number)).filter(Message.user_id == posted_object['events'][0]['source']['userId']).scalar()
+                text = '合計は、' + str(total) + 'です。'
+                Message04 = Message(content=user_message, time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
+            elif user_message == 'タスク登録':
+                text = 'タスクを登録します。タスク名を入力してください。'
+                task_status[user_id_from_line] = 'waiting_for_task_name'
+                Message04 = Message(content=user_message, time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
+            elif user_message == 'タスク一覧':
+                #タスク一覧を取得
+                tasks = Task.query.filter_by(user_id=user_id_from_line).all()
+                text = 'タスク一覧\n'
+                for task in tasks:
+                    text += f'{task.task_name}: {task.daily_goal}\n'
+                Message04 = Message(content=user_message, time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
             else:
-                text = posted_object['events'][0]['message']['text']+'を記録しました'
-                Message04 = Message(content=posted_object['events'][0]['message']['text'], time=datetime.datetime.now(), number = posted_object['events'][0]['message']['text'], user_id = posted_object['events'][0]['source']['userId'])
+                #posted_object['events'][0]['message']['text']が数字かどうかを判定
+                try:
+                    int(user_message)
+                except ValueError:
+                    text = get_reply(user_message)
+                    Message04 = Message(content=user_message, time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
+                else:
+                    text = user_message+'を記録しました'
+                    Message04 = Message(content=user_message, time=datetime.datetime.now(), number = posted_object['events'][0]['message']['text'], user_id = posted_object['events'][0]['source']['userId'])
+        elif task_status[user_id_from_line] == 'waiting_for_task_name':
+            #同じタスク名が登録されていないか確認
+            current_task_name = Task.query.filter_by(user_id=user_id_from_line, task_name=user_message).first()
+            if current_task_name:
+                text = f"タスク '{user_message}' は既に登録されています。別の名前を入力してください。"
+            else:
+                # タスク名を受け取る
+                text = f"タスク名: {user_message} を受け取りました。次に、1日に達成したい目標数を入力してください。"
+                if current_task.task_name != '未定':
+                    new = Task(user_id=user_id_from_line, task_name = user_message)
+                    db.session.add(new)
+                    db.session.commit()
+                #初回のみ
+                else:
+                    task_name = user_message
+                    current_task.task_name = task_name
+                    db.session.commit()
+                task_status[user_id_from_line] = 'waiting_for_task_goal'
+            Message04 = Message(content=user_message, time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
+        elif task_status[user_id_from_line] == 'waiting_for_task_goal':
+            # タスクの目標数を受け取る
+            try:
+                daily_goal = int(user_message)
+                current_task.daily_goal = daily_goal
+                db.session.commit()
+                text = f"タスク '{current_task.task_name}' が登録されました。目標: {daily_goal}"
+                # 状態をリセット
+                task_status[user_id_from_line]= 'idle'
+            except ValueError:
+                text = '目標数は整数で入力してください。'
+            Message04 = Message(content=user_message, time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'], task_id = current_task.task_id)
         db.session.add(Message04)
         db.session.commit()
         print('登録 =>', Message04)
-        # テーブルのレコード数を取得
-        cursor.execute("SELECT COUNT(*) FROM talks")
-        count = cursor.fetchone()[0]
-        print(count)
         print('=========１件取得==========')
-
-        """
-        if count > 1:
-            target = Message.query.filter_by(id=count-2).first()
-            print('取得 =>', target.content)
-            text = '前回の会話は、' + target.content
-        else:
-            text = '初めての会話です'
-        """
 
     # 本当に LINE Messaging API からの POST か?
     # 本当はイベントタイプがmessageであることもヘッダーから確認する必要 https://developers.line.biz/ja/docs/messaging-api/receiving-messages/
@@ -184,8 +228,6 @@ def response():
     Message05 = Message(content=text, time=datetime.datetime.now(), number = 1, user_id = 'line')
     db.session.add(Message05)
     db.session.commit()
-    if Message05.number == posted_object['events'][0]['message']['text']:
-            Message05.user = 1
     response = requests.post(lineconfig.REPLYAPIURL, data=json.dumps(payload),headers=headers)
     print("=response from LINE Messaging API")
     print(response)
