@@ -96,7 +96,7 @@ def response():
     if len(posted_object['events']) > 1 or 'text' not in posted_object['events'][0]['message']:
         task_status[user_id_from_line] = 'idle'
         text = default_message+'\n'+'[メニュー] : メニューを表示'
-        Message04 = Message(content='notext', time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
+        Message04 = Message(content='notext', time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'], status = 'idle')
         print('複数のメッセージかtextでないメッセージです。')
     else:
         print(posted_object['events'][0]['message']['text'])
@@ -208,7 +208,7 @@ def response():
                         if not tasks:
                             text = '登録されているタスクがありません。'
                         else:
-                            text = '実行記録を変更します。変更したいタスク名を入力してください。\n'+'現在のタスク一覧\n'
+                            text = '実行記録を変更します。変更したいタスク名を入力してください。\n\n'+'現在のタスク一覧\n'
                             for task in tasks:
                                 text += f'{task.task_name}: {task.daily_goal}\n'
                             text += '\n'+'キャンセルする場合は「キャンセル」と入力してください。'
@@ -323,8 +323,12 @@ def response():
                 elif task_status[user_id_from_line] == 'waiting_for_confilm_name':
                     current_task = Task.query.filter_by(user_id=user_id_from_line, task_name=user_message, enable=True).first()
                     if current_task:
-                        text = f"タスク '{user_message}' の記録を確認します。\n今までの記録を確認したい日付を入力してください。\n[合計]、[7日]、[30日]のいずれかを入力してください。"
-                        task_status[user_id_from_line] = 'waiting_for_confilm_date'
+                        if current_task.report == 0:
+                            text = f"タスク '{user_message}' は実行されていません。"
+                            task_status[user_id_from_line] = 'idle'
+                        else:
+                            text = f"タスク '{user_message}' の記録を確認します。\n今までの記録を確認したい日付を入力してください。\n[合計]、[7日]、[30日]のいずれかを入力してください。"
+                            task_status[user_id_from_line] = 'waiting_for_confilm_date'
                         Message04 = Message(content=user_message, time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'], task_id = current_task.task_id, status = 'waiting_for_confilm_name')
                     else:
                         text = f"タスク '{user_message}' は登録されていません。\n"+'[メニュー] : メニューを表示'
@@ -336,7 +340,7 @@ def response():
                     current_task = Task.query.filter_by(task_id = current_task_id.task_id, user_id=user_id_from_line, enable=True).first()
                     if user_message == '合計':
                         total = db.session.query(func.sum(Message.number)).filter(Message.user_id == posted_object['events'][0]['source']['userId'], Message.task_id == current_task.task_id).scalar()
-                        text = f"タスク '{current_task.task_name}' の合計は {total} 、"+'平均は{:.1f}です。\nこれまでの実行回数の合計は{current_task.report}回です。'.format(total/current_task.report)
+                        text = f"タスク '{current_task.task_name}' の合計は {total} 、"+'平均は{:.1f}です。\n'.format(total/current_task.report) + f"これまでの実行回数の合計は{current_task.report}回です。"
                         task_status[user_id_from_line] = 'idle'
                     elif user_message == f'{time_short}日':
                         seven_days_ago = datetime.datetime.now() - datetime.timedelta(days=time_short)
@@ -356,7 +360,7 @@ def response():
                 elif task_status[user_id_from_line] == 'waiting_for_task_changegoal':
                     current_task = Task.query.filter_by(user_id=user_id_from_line, task_name=user_message, enable=True).first()
                     if current_task:
-                        text = f"タスク '{user_message}' の目標数を変更します。新しい目標数を入力してください。"
+                        text = f"タスク '{user_message}' の目標数を変更します。新しい目標数を入力してください。\n現在の目標数: {current_task.daily_goal}"
                         task_status[user_id_from_line] = 'waiting_for_task_changegoal_number'
                         Message04 = Message(content=user_message, time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'], task_id = current_task.task_id, status = 'waiting_for_task_changegoal')
                     else:
@@ -420,12 +424,12 @@ def response():
                     text += default_message+'\n'+'[メニュー] : メニューを表示'
                     Message04 = Message(content=user_message, time=datetime.datetime.now(), number = 0, user_id = posted_object['events'][0]['source']['userId'])
         
-        #Mwssage04を更新
-        Message04.status = task_status[user_id_from_line]
-        db.session.add(Message04)
-        db.session.commit()
-        print('登録 =>', Message04)
-        print('=========１件取得==========')
+    #Mwssage04を更新
+    Message04.status = task_status[user_id_from_line]
+    db.session.add(Message04)
+    db.session.commit()
+    print('登録 =>', Message04)
+    print('=========１件取得==========')
 
     # 本当に LINE Messaging API からの POST か?
     # 本当はイベントタイプがmessageであることもヘッダーから確認する必要 https://developers.line.biz/ja/docs/messaging-api/receiving-messages/
@@ -466,7 +470,7 @@ def response():
 
 # お約束
 if __name__ == '__main__':
-    print("afo")
+    #print("afo")
     allowed_host='0.0.0.0'
     server_port=3000
     app.debug=True
