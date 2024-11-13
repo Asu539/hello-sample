@@ -93,10 +93,6 @@ with app.app_context():
                         }
                     ]
                 }
-            #全てのtask.do_taskを0にする
-            tasks = Task.query.filter(Task.user_id == user_id_from_line, Task.is_done == 1).all()
-            for task in tasks:
-                task.is_done = 0
             Message05 = Message(content=text, time=datetime.datetime.now(), number = 0, user_id = 'line')            
             db.session.add(Message05)
             db.session.commit()
